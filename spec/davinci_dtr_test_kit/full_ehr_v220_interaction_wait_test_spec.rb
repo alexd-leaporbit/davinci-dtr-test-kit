@@ -120,4 +120,58 @@ RSpec.describe DaVinciDTRTestKit::DTRFullEHRV220InteractionWaitTest do # rubocop
       expect(result.result).to eq('wait')
     end
   end
+
+  describe 'config.options[:interaction_message]' do
+    let(:custom_message_test_class) do
+      Class.new(described_class) do
+        id :interaction_wait_custom_message_spec_test
+        config options: {
+          interaction_message: "Do these things:\n- **Change** a pre-populated answer\n\n" \
+                               "[Continue](%<continuation_url>s) to attest.\n"
+        }
+      end
+    end
+
+    before do
+      tests_repo = Inferno::Repositories::Tests.new
+      tests_repo.insert(custom_message_test_class) unless tests_repo.exists?(custom_message_test_class.id.to_s)
+    end
+
+    it 'replaces everything before the endpoint details with the configured message' do
+      result = run(custom_message_test_class, { client_id: })
+
+      expect(result.result).to eq('wait')
+      expect(result.result_message).to start_with("Do these things:\n- **Change** a pre-populated answer\n")
+      expect(result.result_message).to_not include('Inferno will wait while the tester uses the system')
+      expect(result.result_message).to include("\n### Endpoints\n")
+    end
+
+    it 'fills in the link to continue' do
+      result = run(custom_message_test_class, { client_id: })
+
+      expect(result.result_message).to match(%r{\[Continue\]\(\S+/resume_pass\?token=#{client_id}\) to attest\.})
+    end
+
+    it 'uses the standard message, with its link to continue, when no message is configured' do
+      result = run(always_run_test_class, { client_id: })
+
+      expect(result.result_message).to start_with('Inferno will wait while the tester uses the system')
+      expect(result.result_message).to match(%r{\[Click here\]\(\S+/resume_pass\?token=#{client_id}\)})
+      expect(result.result_message).to include("\n### Endpoints\n")
+    end
+
+    it 'closes the code span around the FHIR Base URL in the standard message' do
+      result = run(always_run_test_class, { client_id: })
+
+      expect(result.result_message).to match(%r{^- FHIR Base: `\S+/fhir`$})
+    end
+
+    it 'indents no line by four or more spaces, so no part renders as a code block' do
+      [custom_message_test_class, always_run_test_class].each do |test_class|
+        result = run(test_class, { client_id: })
+
+        expect(result.result_message.lines.grep(/\A {4,}\S/)).to be_empty
+      end
+    end
+  end
 end
